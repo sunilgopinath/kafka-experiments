@@ -2,16 +2,22 @@ package consumer
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
 // StartConsumer listens for notifications and processes only the given notification type (email, sms, push)
 func StartConsumer(notificationType string) {
+	groupID := notificationType + "-service" // Group ID for scaling
+
 	c, err := kafka.NewConsumer(&kafka.ConfigMap{
 		"bootstrap.servers": "localhost:9092",
-		"group.id":          notificationType + "-service",
+		"group.id":          groupID,  // Multiple instances will be part of this group
 		"auto.offset.reset": "earliest",
 	})
 	if err != nil {
@@ -21,6 +27,18 @@ func StartConsumer(notificationType string) {
 
 	c.SubscribeTopics([]string{"high_priority_notifications", "low_priority_notifications"}, nil)
 
+	// Handle shutdown gracefully
+	sigchan := make(chan os.Signal, 1)
+	signal.Notify(sigchan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-sigchan
+		fmt.Println("\nShutting down", notificationType, "consumer...")
+		c.Close()
+		os.Exit(0)
+	}()
+
+	// Process messages
 	for {
 		msg, err := c.ReadMessage(-1)
 		if err == nil {

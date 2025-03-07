@@ -73,3 +73,35 @@ docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic h
 
 docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic low_priority_notifications --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
 ```
+
+## Order Service
+
+Create 4 topics
+ - order_created
+ - order_paid
+ - order_shipped
+ - order_delivered
+
+```bash
+docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic order_created --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
+
+docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic order_paid --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
+
+docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic order_shipped --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
+
+docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic order_delivered --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
+```
+
+### Verify topic creation
+
+```bash
+❯ docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --list --bootstrap-server localhost:9092
+
+__consumer_offsets
+...
+order_created
+order_delivered
+order_paid
+order_shipped
+...
+```
