@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
+	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/jackc/pgx/v5"
@@ -32,6 +35,15 @@ func main() {
 		os.Exit(1)
 	}
 	defer conn.Close(context.Background())
+
+    // Create Kafka producer for DLQ
+    producer, err := kafka.NewProducer(&kafka.ConfigMap{
+        "bootstrap.servers": "localhost:9092",
+    })
+    if err != nil {
+        log.Fatalf("Failed to create DLQ producer: %v", err)
+    }
+    defer producer.Close()
 
 	// Set up Kafka consumer
 	c, err := kafka.NewConsumer(&kafka.ConfigMap{
@@ -59,7 +71,7 @@ func main() {
 
 		// Flush remaining batch before exiting
 		if len(eventBatch) > 0 {
-			insertBatch(conn, eventBatch)
+			insertBatch(conn, eventBatch, producer)
 		}
 
 		c.Close()
@@ -84,7 +96,7 @@ func main() {
 
 			// If batch reaches batchSize, insert into PostgreSQL
 			if len(eventBatch) >= batchSize {
-				insertBatch(conn, eventBatch)
+				insertBatch(conn, eventBatch, producer)
 				eventBatch = eventBatch[:0] // Reset batch
 			}
 		} else {
@@ -95,26 +107,66 @@ func main() {
 }
 
 // insertBatch inserts multiple events into PostgreSQL in a single query
-func insertBatch(conn *pgx.Conn, batch []UserEvent) {
-	fmt.Printf("Inserting batch of %d events...\n", len(batch))
+func insertBatch(conn *pgx.Conn, batch []UserEvent, producer *kafka.Producer) {
+	maxRetries := 5
+	baseDelay := 100 * time.Millisecond // Start with 100ms
+	jitterFactor := 0.3                 // Add up to 30% random jitter
 
-	// Prepare SQL statement
-	sql := "INSERT INTO user_activity (user_id, event_type, timestamp) VALUES "
-	args := make([]interface{}, 0, len(batch)*3)
-	placeholders := ""
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		fmt.Printf("Attempt %d: Inserting batch of %d events...\n", attempt, len(batch))
 
-	for i, event := range batch {
-		placeholders += fmt.Sprintf("($%d, $%d, $%d),", i*3+1, i*3+2, i*3+3)
-		args = append(args, event.UserID, event.EventType, event.Timestamp)
+		// Prepare SQL statement
+		sql := "INSERT INTO user_activity (user_id, event_type, timestamp) VALUES "
+		args := make([]interface{}, 0, len(batch)*3)
+		placeholders := ""
+
+		for i, event := range batch {
+			placeholders += fmt.Sprintf("($%d, $%d, $%d),", i*3+1, i*3+2, i*3+3)
+			args = append(args, event.UserID, event.EventType, event.Timestamp)
+		}
+		sql = sql + placeholders[:len(placeholders)-1] // Remove last comma
+
+		// Execute batch insert
+		_, err := conn.Exec(context.Background(), sql, args...)
+		if err == nil {
+			log.Printf("Successfully inserted batch of %d events\n", len(batch))
+			return
+		}
+
+		log.Printf("Failed to insert batch (attempt %d/%d): %v\n", attempt, maxRetries, err)
+
+		// Calculate exponential backoff with jitter
+		backoffTime := baseDelay * time.Duration(math.Pow(2, float64(attempt))) // Exponential increase
+		jitter := time.Duration(rand.Float64() * jitterFactor * float64(backoffTime)) // Add random jitter
+		sleepTime := backoffTime + jitter
+
+		log.Printf("Retrying in %v...\n", sleepTime)
+		time.Sleep(sleepTime)
 	}
 
-	sql = sql + placeholders[:len(placeholders)-1] // Remove last comma
+	log.Printf("Max retries reached. Sending batch to Dead Letter Queue (DLQ).")
 
-	// Execute batch insert
-	_, err := conn.Exec(context.Background(), sql, args...)
-	if err != nil {
-		log.Printf("Failed to insert batch: %v\n", err)
-	} else {
-		log.Printf("Successfully inserted batch of %d events\n", len(batch))
+	// Send failed batch to Dead Letter Queue
+	sendToDLQ(batch, producer)
+}
+
+func sendToDLQ(batch []UserEvent, producer *kafka.Producer) {
+	topic := "dead_letter_queue"
+
+	for _, event := range batch {
+		data, _ := json.Marshal(event)
+
+		err := producer.Produce(&kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
+			Value:          data,
+		}, nil)
+
+		if err != nil {
+			log.Printf("Failed to send event to DLQ: %v\n", err)
+		} else {
+			log.Printf("Sent failed event to DLQ: %s\n", string(data))
+		}
 	}
+
+	producer.Flush(5000) // Ensure all messages are sent
 }

@@ -49,3 +49,15 @@ Received: {"amount":100,"paymentId":"p1","userId":"u1"}
 ## Write to database upon consumer
 
 Please see [database documentation](./docs/db.md) for setup
+
+## Writing to Dead Letter Queue
+
+```bash
+docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic dead_letter_queue --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
+```
+
+### Test DLQ
+
+```bash
+docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --list --bootstrap-server localhost:9092
+```
