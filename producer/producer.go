@@ -2,8 +2,8 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
+	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
@@ -18,29 +18,29 @@ func main() {
     }
     defer p.Close()
 
-    topic := "payments"
-    payment := map[string]interface{}{"paymentId": "p1", "userId": "u1", "amount": 100}
-    data, _ := json.Marshal(payment)
+    topic := "user_activity"
 
-    deliveryChan := make(chan kafka.Event)
-
-    err = p.Produce(&kafka.Message{
-        TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
-        Value:          data,
-    }, deliveryChan)
-
-    if err != nil {
-        log.Fatalf("Failed to send message: %v", err)
+    events := []map[string]interface{}{
+        {"userId": "u1", "eventType": "page_view", "timestamp": time.Now().Unix()},
+        {"userId": "u2", "eventType": "click", "timestamp": time.Now().Unix()},
+        {"userId": "u3", "eventType": "purchase", "timestamp": time.Now().Unix()},
     }
 
-    e := <-deliveryChan
-    m := e.(*kafka.Message)
+    for _, event := range events {
+        data, _ := json.Marshal(event)
+        key := event["userId"].(string) // Use userId as the key
 
-    if m.TopicPartition.Error != nil {
-        log.Fatalf("Delivery failed: %v", m.TopicPartition.Error)
-    } else {
-        fmt.Printf("Message delivered to %v\n", m.TopicPartition)
+        err = p.Produce(&kafka.Message{
+            TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
+            Key:           []byte(key), // Key ensures partitioning by user
+            Value:         data,
+        }, nil)
+
+        if err != nil {
+            log.Fatalf("Failed to send message: %v", err)
+        }
     }
 
     p.Flush(5000)
+    log.Println("Sent user activity events")
 }

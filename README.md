@@ -45,3 +45,7 @@ terminal 2
 ❯ go run consumer/consumer.go
 Received: {"amount":100,"paymentId":"p1","userId":"u1"}
 ```
+
+## Write to database upon consumer
+
+Please see [database documentation](./docs/db.md) for setup
