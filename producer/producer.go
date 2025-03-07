@@ -24,6 +24,18 @@ func main() {
         {"userId": "u1", "eventType": "page_view", "timestamp": time.Now().Unix()},
         {"userId": "u2", "eventType": "click", "timestamp": time.Now().Unix()},
         {"userId": "u3", "eventType": "purchase", "timestamp": time.Now().Unix()},
+        {"userId": "u1", "eventType": "page_view", "timestamp": time.Now().Unix()},
+        {"userId": "u2", "eventType": "click", "timestamp": time.Now().Unix()},
+        {"userId": "u3", "eventType": "purchase", "timestamp": time.Now().Unix()},
+        {"userId": "u1", "eventType": "page_view", "timestamp": time.Now().Unix()},
+        {"userId": "u2", "eventType": "click", "timestamp": time.Now().Unix()},
+        {"userId": "u3", "eventType": "purchase", "timestamp": time.Now().Unix()},
+        {"userId": "u1", "eventType": "page_view", "timestamp": time.Now().Unix()},
+        {"userId": "u2", "eventType": "click", "timestamp": time.Now().Unix()},
+        {"userId": "u3", "eventType": "purchase", "timestamp": time.Now().Unix()},
+        {"userId": "u1", "eventType": "page_view", "timestamp": time.Now().Unix()},
+        {"userId": "u2", "eventType": "click", "timestamp": time.Now().Unix()},
+        {"userId": "u3", "eventType": "purchase", "timestamp": time.Now().Unix()},
     }
 
     for _, event := range events {
