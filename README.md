@@ -61,3 +61,15 @@ docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic d
 ```bash
 docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --list --bootstrap-server localhost:9092
 ```
+
+## Notification System
+
+Create two queues
+1. high priority
+2. low priority
+
+```bash
+docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic high_priority_notifications --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
+
+docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic low_priority_notifications --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
+```

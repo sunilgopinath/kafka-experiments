@@ -1,4 +1,4 @@
-package main
+package producer
 
 import (
 	"encoding/json"
@@ -8,51 +8,51 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
-func main() {
-    p, err := kafka.NewProducer(&kafka.ConfigMap{
-        "bootstrap.servers": "localhost:9092",
-        "security.protocol": "PLAINTEXT",
-    })
-    if err != nil {
-        log.Fatalf("Failed to create producer: %v", err)
-    }
-    defer p.Close()
+// Notification struct (imported from consumer package)
+type Notification struct {
+	UserID    string `json:"userId"`
+	Type      string `json:"type"`     // email, sms, push
+	Priority  string `json:"priority"` // high, low
+	Message   string `json:"message"`
+	Timestamp int64  `json:"timestamp"`
+}
 
-    topic := "user_activity"
+// Start sends notifications to Kafka
+func Start() {
+	p, err := kafka.NewProducer(&kafka.ConfigMap{
+		"bootstrap.servers": "localhost:9092",
+	})
+	if err != nil {
+		log.Fatalf("Failed to create producer: %v", err)
+	}
+	defer p.Close()
 
-    events := []map[string]interface{}{
-        {"userId": "u1", "eventType": "page_view", "timestamp": time.Now().Unix()},
-        {"userId": "u2", "eventType": "click", "timestamp": time.Now().Unix()},
-        {"userId": "u3", "eventType": "purchase", "timestamp": time.Now().Unix()},
-        {"userId": "u1", "eventType": "page_view", "timestamp": time.Now().Unix()},
-        {"userId": "u2", "eventType": "click", "timestamp": time.Now().Unix()},
-        {"userId": "u3", "eventType": "purchase", "timestamp": time.Now().Unix()},
-        {"userId": "u1", "eventType": "page_view", "timestamp": time.Now().Unix()},
-        {"userId": "u2", "eventType": "click", "timestamp": time.Now().Unix()},
-        {"userId": "u3", "eventType": "purchase", "timestamp": time.Now().Unix()},
-        {"userId": "u1", "eventType": "page_view", "timestamp": time.Now().Unix()},
-        {"userId": "u2", "eventType": "click", "timestamp": time.Now().Unix()},
-        {"userId": "u3", "eventType": "purchase", "timestamp": time.Now().Unix()},
-        {"userId": "u1", "eventType": "page_view", "timestamp": time.Now().Unix()},
-        {"userId": "u2", "eventType": "click", "timestamp": time.Now().Unix()},
-        {"userId": "u3", "eventType": "purchase", "timestamp": time.Now().Unix()},
-    }
+	notifications := []Notification{
+		{"user1", "email", "high", "Your OTP is 123456", time.Now().Unix()},
+		{"user2", "sms", "low", "Get 10% off on your next purchase!", time.Now().Unix()},
+		{"user3", "push", "high", "Suspicious login detected!", time.Now().Unix()},
+		{"user4", "email", "low", "Welcome to our service!", time.Now().Unix()},
+	}
 
-    for _, event := range events {
-        data, _ := json.Marshal(event)
-        key := event["userId"].(string) // Use userId as the key
+	for _, notification := range notifications {
+		data, _ := json.Marshal(notification)
+		topic := "low_priority_notifications"
+		if notification.Priority == "high" {
+			topic = "high_priority_notifications"
+		}
 
-        err = p.Produce(&kafka.Message{
-            TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
-            Key:           []byte(key), // Key ensures partitioning by user
-            Value:         data,
-        }, nil)
+		err := p.Produce(&kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
+			Value:          data,
+		}, nil)
 
-        if err != nil {
-            log.Fatalf("Failed to send message: %v", err)
-        }
-    }
+		if err != nil {
+			log.Printf("Failed to send notification: %v\n", err)
+		} else {
+			log.Printf("Sent notification: %+v\n", notification)
+		}
+	}
 
-    p.Flush(5000)
-    log.Println("Sent user activity events")
+	p.Flush(5000)
+	log.Println("All notifications sent.")
 }
