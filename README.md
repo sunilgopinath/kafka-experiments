@@ -1,237 +1,189 @@
-# **Event-Driven Microservices with Kafka**
+# Kafka-Based Microservices with Avro & Schema Registry
 
-## **🚀 Overview**
-This project implements an **event-driven microservices architecture** using **Apache Kafka**. We built a **scalable E-commerce Order Processing System** with **Event Sourcing**, where each microservice publishes and consumes **domain events** asynchronously.
+## Overview
+This project implements a **Kafka-based microservices architecture** using Avro serialization and the Confluent Schema Registry. The system follows an **event-driven approach** with multiple services communicating via Kafka topics.
 
-## **🛠️ Technologies Used**
-- **Go (Golang)** - Microservice implementation
-- **Apache Kafka** - Event streaming platform
-- **Docker & Docker Compose** - Service orchestration
-- **PostgreSQL (Optional)** - Database for persistence
-- **Kafka Consumer Groups** - Parallel processing
-- **Exponential Backoff & Retry Mechanisms** - Fault tolerance
-- **Dead Letter Queue (DLQ)** - Handling failures gracefully
-  
-## **📌 Architecture**
+## 🚀 Features
+- **Kafka-based messaging** with producers and consumers.
+- **Schema Registry Integration** for Avro-based message serialization.
+- **Event-driven microservices** with order processing, payments, inventory, shipping, and notifications.
+- **Distributed Transactions (Saga Pattern)** for order management.
 
+---
+## 🏗 Architecture
+### **Microservices & Topics**
+| Service              | Consumes From         | Produces To             |
+|----------------------|----------------------|--------------------------|
+| `order_service`      | -                    | `order_created`         |
+| `payment_service`    | `order_created`      | `order_paid`            |
+| `inventory_service`  | `order_created`      | `inventory_reserved`    |
+| `shipping_service`   | `order_paid`         | `order_shipped`         |
+| `delivery_service`   | `order_shipped`      | `order_delivered`       |
+| `notification_service` | `order_*` events   | -                        |
+
+### **Schema Registry Integration**
+All events are serialized in **Avro** before being published to Kafka.
+- **Schema Registry URL**: `http://localhost:8081`
+- **Registered Subjects**:
+  - `order_events-value`
+  - `order_created-value`
+  - `order_paid-value`
+  - `order_shipped-value`
+
+---
+## 🛠 Setup
+### **1️⃣ Start Kafka & Schema Registry**
+```sh
+docker-compose up -d
 ```
-USER → Order Service → order_created → Kafka
-              ↳ Payment Service → order_paid → Kafka
-              ↳ Inventory Service → inventory_reserved/inventory_failed → Kafka
-              ↳ Shipping Service → order_shipped → Kafka
-              ↳ Delivery Service → order_delivered → Kafka
-              ↳ Notification Service → Sends user updates
-```
-
-- **Each service listens for relevant Kafka topics.**
-- **Microservices communicate via domain events (not direct API calls).**
-- **Kafka retains a history of events (Event Sourcing).**
-- **Event Replay allows restoring state from Kafka topics.**
-
-## **📂 Project Structure**
-```
-.
-├── cmd
-│   ├── order_service        # Handles order creation
-│   │   └── main.go
-│   ├── payment_service      # Handles payment processing
-│   │   └── main.go
-│   ├── shipping_service     # Handles shipping
-│   │   └── main.go
-│   ├── delivery_service     # Handles order delivery
-│   │   └── main.go
-│   ├── inventory_service    # Manages stock availability
-│   │   └── main.go
-│   ├── notification_service # Sends user notifications
-│   │   └── main.go
-│
-├── internal
-│   ├── models               # Shared domain models
-│   │   └── order.go
-│   ├── kafka                # Kafka utility functions
-│   │   ├── producer.go
-│   │   ├── consumer.go
-│
-├── docker-compose.yml        # Kafka + Zookeeper setup
-├── go.mod                    # Go dependencies
-├── go.sum                    # Go dependency hashes
-└── README.md                 # Project documentation
+Ensure both services are running:
+```sh
+docker ps
 ```
 
-## **📝 Order Event Model** (Shared Across Microservices)
-```go
-package models
+### **2️⃣ Verify Schema Registry**
+```sh
+curl -X GET http://localhost:8081/subjects
+```
+Expected output:
+```json
+["order_events-value"]
+```
 
-type OrderEvent struct {
-    OrderID   string `json:"orderId"`
-    UserID    string `json:"userId"`
-    Status    string `json:"status"`
-    Timestamp int64  `json:"timestamp"`
+### **3️⃣ Create Kafka Topics**
+```sh
+docker exec -it <KAFKA_CONTAINER_ID> kafka-topics \
+    --create --topic order_created --partitions 3 --replication-factor 1 \
+    --bootstrap-server localhost:9092
+```
+Repeat for other topics: `order_paid`, `order_shipped`, `order_delivered`, `inventory_reserved`.
+
+---
+## 📦 Services
+### **Order Service** (Producer)
+```sh
+go run cmd/order_service/main.go
+```
+Publishes Avro-encoded `order_created` events.
+
+### **Payment Service** (Consumer)
+```sh
+go run cmd/payment_service/main.go
+```
+Consumes `order_created` events and produces `order_paid`.
+
+### **Shipping Service** (Consumer)
+```sh
+go run cmd/shipping_service/main.go
+```
+Consumes `order_paid` events and produces `order_shipped`.
+
+---
+## 📜 Avro Schema Example
+### **schemas/order_schema.avsc**
+```json
+{
+  "type": "record",
+  "name": "OrderEvent",
+  "fields": [
+    { "name": "orderId", "type": "string" },
+    { "name": "userId", "type": "string" },
+    { "name": "status", "type": "string" },
+    { "name": "timestamp", "type": "long" }
+  ]
 }
 ```
 
 ---
+## 🏗 Internal Components
+### **Kafka Consumer (Avro Decoding)**
+File: `internal/messaging/consumer.go`
+```go
+package messaging
 
-# **🚀 Getting Started**
+import (
+    "log"
+    "github.com/confluentinc/confluent-kafka-go/v2/kafka"
+    "github.com/linkedin/goavro/v2"
+    "github.com/riferrei/srclient"
+)
 
-```bash
-$> git clone git@github.com:sunilgopinath/kafka-experiments.git
+const schemaRegistryURL = "http://localhost:8081"
+
+type KafkaConsumer struct {
+    Consumer  *kafka.Consumer
+    AvroCodec *goavro.Codec
+    Schema    *srclient.Schema
+    Topic     string
+}
+
+func NewAvroConsumer(topic, groupID string) *KafkaConsumer {
+    c, err := kafka.NewConsumer(&kafka.ConfigMap{
+        "bootstrap.servers": "localhost:9094",
+        "group.id":          groupID,
+        "auto.offset.reset": "earliest",
+    })
+    if err != nil {
+        log.Fatalf("Failed to create consumer: %v", err)
+    }
+    c.SubscribeTopics([]string{topic}, nil)
+    
+    schemaRegistryClient := srclient.CreateSchemaRegistryClient(schemaRegistryURL)
+    schema, err := schemaRegistryClient.GetLatestSchema("order_events-value")
+    if err != nil {
+        log.Fatalf("Failed to fetch schema: %v", err)
+    }
+
+    avroCodec, err := goavro.NewCodec(schema.Schema())
+    if err != nil {
+        log.Fatalf("Failed to create Avro codec: %v", err)
+    }
+
+    return &KafkaConsumer{Consumer: c, AvroCodec: avroCodec, Schema: schema, Topic: topic}
+}
+
+func (kc *KafkaConsumer) ConsumeAvroMessage() (map[string]interface{}, error) {
+    msg, err := kc.Consumer.ReadMessage(-1)
+    if err != nil {
+        return nil, err
+    }
+    
+    native, _, err := kc.AvroCodec.NativeFromBinary(msg.Value[5:]) // Skip schema ID
+    if err != nil {
+        return nil, err
+    }
+    return native.(map[string]interface{}), nil
+}
+
+func (kc *KafkaConsumer) Close() {
+    kc.Consumer.Close()
+}
 ```
 
-## **1️⃣ Setup Kafka with Docker**
-Run the following command to start Kafka & Zookeeper:
-```sh
-docker-compose up -d
-```
+---
+## ✅ Next Steps
+- Implement **dead letter queues (DLQ)** for failed messages.
+- Optimize **consumer scaling** with Kafka consumer groups.
+- Implement **transactional guarantees** using Kafka transactions.
 
-✅ **Verify Kafka is running:**
+---
+## 🛠 Troubleshooting
+### **Check if Kafka is Running**
 ```sh
 docker ps | grep kafka
-CONTAINER ID   IMAGE                 COMMAND                  CREATED          STATUS          PORTS                    NAMES
-5a992aa5f7bf   bitnami/kafka:3.6.1   "/opt/bitnami/script…"   15 minutes ago   Up 15 minutes   0.0.0.0:9092->9092/tcp   kafka-experiments-kafka-1
 ```
 
-
-## Create topic
-
-```bash
-$> docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic payments --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
-```
-
-### Test topic creation
-
-```bash
-❯ docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --list --bootstrap-server localhost:9092
-payments
-```
-
-## Usage
-
-terminal 1
-
-```bash
-❯ go run producer/producer.go
-
-Message delivered to payments[1]@0
-```
-
-
-terminal 2
-
-```bash
-❯ go run consumer/consumer.go
-Received: {"amount":100,"paymentId":"p1","userId":"u1"}
-```
-
-## Write to database upon consumer
-
-Please see [database documentation](./docs/db.md) for setup
-
-## Writing to Dead Letter Queue
-
-```bash
-docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic dead_letter_queue --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
-```
-
-### Test DLQ
-
-```bash
-docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --list --bootstrap-server localhost:9092
-```
-
-## Notification System
-
-Create two queues
-1. high priority
-2. low priority
-
-```bash
-docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic high_priority_notifications --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
-
-docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic low_priority_notifications --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
-```
-
-## Order Service
-
-### **2️⃣ Create Kafka Topics**
+### **Check Topics**
 ```sh
-docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic order_created --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
-
-docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic order_paid --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
-
-docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic order_shipped --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
-
-docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --create --topic order_delivered --partitions 3 --replication-factor 1 --bootstrap-server localhost:9092
+docker exec -it <KAFKA_CONTAINER_ID> kafka-topics --list --bootstrap-server localhost:9092
 ```
-✅ **Verify topics:**
+
+### **Check Messages in a Topic**
 ```sh
-docker exec -it $(docker ps -q -f name=kafka) kafka-topics.sh --list --bootstrap-server localhost:9092
+docker exec -it <KAFKA_CONTAINER_ID> kafka-console-consumer --topic order_created --from-beginning --bootstrap-server localhost:9092
 ```
 
 ---
+## 🎯 Conclusion
+This system enables **event-driven microservices** with **Avro serialization** and **Kafka Schema Registry**, ensuring **message consistency** and **compatibility** between services. 🚀
 
-# **🛠️ Running the Microservices**
-
-## **Start All Services in Separate Terminals**
-```sh
-go run cmd/order_service/main.go
-```
-```sh
-go run cmd/payment_service/main.go
-```
-```sh
-go run cmd/shipping_service/main.go
-```
-```sh
-go run cmd/delivery_service/main.go
-```
-```sh
-go run cmd/inventory_service/main.go
-```
-```sh
-go run cmd/notification_service/main.go
-```
-
-✅ **Expected Output:**
-```
-🛒 Order Created: order1
-💰 Payment Processed: order1
-✅ Inventory Reserved for Order order1
-📦 Shipping Order: order1
-🚚 Order Delivered: order1
-📩 Notification sent: Order shipped
-```
-
----
-
-# **📌 Event Replay (Event Sourcing)**
-If a service **crashes**, we can replay events to rebuild its state.
-```sh
-docker exec -it $(docker ps -q -f name=kafka) kafka-console-consumer.sh --topic order_created --from-beginning --bootstrap-server localhost:9092
-```
-✅ **Expected Output:**
-```
-{"orderId":"order1","userId":"user1","status":"order_created","timestamp":1711345827}
-```
-
----
-
-# **📊 Monitoring & Debugging**
-✅ **View consumer group assignments:**
-```sh
-docker exec -it $(docker ps -q -f name=kafka) kafka-consumer-groups.sh --describe --group order-service --bootstrap-server localhost:9092
-```
-
-✅ **View Dead Letter Queue (DLQ) events:**
-```sh
-docker exec -it $(docker ps -q -f name=kafka) kafka-console-consumer.sh --topic dead_letter_queue --from-beginning --bootstrap-server localhost:9092
-```
-
----
-
-# **🛠️ Next Steps**
-🔹 **Add Retries & Exponential Backoff for Failures**
-🔹 **Implement DLQ Handling for Fault-Tolerant Processing**
-🔹 **Optimize Performance with Kafka Streams & Schema Registry**
-
-🚀 **Happy Coding!** 🎯
