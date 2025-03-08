@@ -1,0 +1,10 @@
+{
+  "type": "record",
+  "name": "OrderEvent",
+  "fields": [
+    {"name": "orderId", "type": "string"},
+    {"name": "userId", "type": "string"},
+    {"name": "status", "type": "string"},
+    {"name": "timestamp", "type": "long"}
+  ]
+}

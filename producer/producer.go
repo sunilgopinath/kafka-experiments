@@ -20,7 +20,7 @@ type Notification struct {
 // Start sends notifications to Kafka
 func Start() {
 	p, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers": "localhost:9092",
+		"bootstrap.servers": "localhost:9094",
 	})
 	if err != nil {
 		log.Fatalf("Failed to create producer: %v", err)

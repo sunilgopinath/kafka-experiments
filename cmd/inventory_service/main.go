@@ -17,7 +17,7 @@ var productStock = map[string]int{
 func main() {
 	// Create Kafka consumer
 	c, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers": "localhost:9092",
+		"bootstrap.servers": "localhost:9094",
 		"group.id":          "inventory-service",
 		"auto.offset.reset": "earliest",
 	})
@@ -30,7 +30,7 @@ func main() {
 
 	// Create Kafka producer
 	p, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers": "localhost:9092",
+		"bootstrap.servers": "localhost:9094",
 	})
 	if err != nil {
 		log.Fatalf("Failed to create producer: %v", err)

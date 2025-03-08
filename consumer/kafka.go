@@ -16,7 +16,7 @@ func StartConsumer(notificationType string) {
 	groupID := notificationType + "-service" // Group ID for scaling
 
 	c, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers": "localhost:9092",
+		"bootstrap.servers": "localhost:9094",
 		"group.id":          groupID,  // Multiple instances will be part of this group
 		"auto.offset.reset": "earliest",
 	})
